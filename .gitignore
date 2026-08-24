@@ -1,0 +1,6 @@
+﻿data/raw/
+data_lake/
+__pycache__/
+*.pyc
+.venv/
+venv/
