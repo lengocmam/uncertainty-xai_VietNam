@@ -190,6 +190,11 @@ def run_full_pipeline(name: str, df: pd.DataFrame, feature_cols: list, target_co
     model_lower.fit(X_train, y_train)
     model_upper.fit(X_train, y_train)
 
+    print("\n  Feature importances (model_upper, alpha=0.95) — kiểm tra xem mô hình"
+          " có thực sự dùng đặc trưng nào không, đặc biệt các biến rời rạc như dayofweek:")
+    for f, imp in sorted(zip(feature_cols, model_upper.feature_importances_), key=lambda x: -x[1]):
+        print(f"    {f:20s}: {imp:.4f}")
+
     # Bước 1: Conformal calibration
     lower_calib = model_lower.predict(X_calib)
     upper_calib = model_upper.predict(X_calib)
@@ -228,9 +233,25 @@ def run_full_pipeline(name: str, df: pd.DataFrame, feature_cols: list, target_co
 
 
 if __name__ == "__main__":
+    all_summaries = {}
+
     gefcom = pd.read_parquet(os.path.join(GOLD_DIR, "gefcom2014_features.parquet"))
     gefcom_features = ["load_lag_1", "load_lag_24", "load_lag_168", "hour", "dayofweek", "temp_best"]
-    run_full_pipeline("gefcom2014", gefcom, gefcom_features)
+    _, gefcom_summary = run_full_pipeline("gefcom2014", gefcom, gefcom_features)
+    all_summaries["gefcom2014"] = gefcom_summary
 
-    print("\nHoàn tất — kết quả lưu trong results/tables/uncertainty_attribution_*.csv "
-          "và uncertainty_summary_*.csv. Đây là bảng số liệu chính cho Section 5.1-5.3 của bài báo.")
+    opsd = pd.read_parquet(os.path.join(GOLD_DIR, "opsd_features.parquet"))
+    opsd_features = ["load_lag_1", "load_lag_24", "load_lag_168", "hour", "dayofweek"]
+    opsd_features += [c for c in ["solar", "wind"] if c in opsd.columns]
+    _, opsd_summary = run_full_pipeline("opsd", opsd, opsd_features)
+    all_summaries["opsd"] = opsd_summary
+
+    # Bảng so sánh nhanh giữa 2 nguồn — dùng trực tiếp cho Section 5.1 của bài báo
+    compare_df = pd.DataFrame(all_summaries).T
+    compare_df.to_csv(os.path.join(RESULTS_DIR, "uncertainty_summary_comparison.csv"))
+    print(f"\n{'='*60}\nBẢNG SO SÁNH GEFCom2014 vs OPSD\n{'='*60}")
+    print(compare_df)
+
+    print("\nHoàn tất — kết quả lưu trong results/tables/uncertainty_attribution_*.csv, "
+          "uncertainty_summary_*.csv, và uncertainty_summary_comparison.csv. "
+          "Đây là bảng số liệu chính cho Section 5.1-5.3 của bài báo.")

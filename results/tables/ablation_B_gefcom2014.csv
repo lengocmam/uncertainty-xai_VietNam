@@ -1,0 +1,3 @@
+variant,coverage,interval_width
+without_calibration,0.8917136659436009,16.830027977181604
+with_calibration,0.9005639913232104,17.155713479691943
