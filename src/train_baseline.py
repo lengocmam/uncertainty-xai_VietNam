@@ -7,9 +7,15 @@ Chạy sau khi đã chạy xong pipeline_datasets.py (cần có 2 file Gold parq
 """
 
 import os
+# QUAN TRỌNG: phải đặt dòng này TRƯỚC khi import numpy/torch/sklearn -
+# sửa lỗi xung đột thư viện OpenMP/MKL giữa torch và scikit-learn trên
+# Windows (OSError: DLL initialization routine failed / c10.dll).
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
+from gru_quantile_model import GRUQuantileRegressor
 
 GOLD_DIR = os.path.join("data_lake", "gold")
 RESULTS_DIR = os.path.join("results", "tables")
@@ -61,13 +67,12 @@ def train_quantile_lgbm(df: pd.DataFrame, feature_cols: list, target_col: str = 
 
     preds = {}
     for q in QUANTILES:
-        model = GradientBoostingRegressor(
-            loss="quantile",
+        model = GRUQuantileRegressor(
             alpha=q,
-            n_estimators=200,
-            learning_rate=0.05,
-            max_depth=4,
-            random_state=42,
+            n_lag_features=3,   # 3 cột đầu của feature_cols PHẢI là lag_1, lag_24, lag_168
+            epochs=200,
+            lr=3e-3,
+            verbose=True,
         )
         model.fit(X_train, y_train)
         preds[q] = model.predict(X_test)

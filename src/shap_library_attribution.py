@@ -74,11 +74,15 @@ def run_shap_for(name: str, df: pd.DataFrame, feature_cols: list, target_col: st
     shap_values = explainer.shap_values(X_test_subset, nsamples="auto")
 
     mean_abs_shap = np.abs(shap_values).mean(axis=0)
-    # Proportional: chỉ phần đóng góp làm TĂNG bất định mới có ý nghĩa "gây bất định"
+    # SỬA LỖI QUAN TRỌNG: dùng mean |SHAP| (trị tuyệt đối) làm thước đo
+    # đóng góp toàn cục - ĐÚNG chuẩn của Lundberg & Lee (2017). Trước đó
+    # dùng mean SHAP CÓ DẤU rồi cắt bỏ số âm là SAI: một đặc trưng làm
+    # khoảng dự báo RỘNG RA ở một số điểm và HẸP LẠI ở điểm khác sẽ bị
+    # triệt tiêu về gần 0 khi lấy trung bình có dấu, dù nó thực sự ảnh
+    # hưởng mạnh (thể hiện đúng qua |SHAP| lớn).
     mean_signed_shap = shap_values.mean(axis=0)
-    positive_part = np.maximum(mean_signed_shap, 0)
-    total = positive_part.sum()
-    pct = positive_part / total * 100 if total > 0 else positive_part
+    total_abs = mean_abs_shap.sum()
+    pct = mean_abs_shap / total_abs * 100 if total_abs > 0 else mean_abs_shap
 
     print("\n  Kết quả SHAP (thư viện chuẩn) — % đóng góp vào độ rộng khoảng dự báo:")
     for f, p, v in sorted(zip(feature_cols, pct, mean_signed_shap), key=lambda x: -x[1]):
