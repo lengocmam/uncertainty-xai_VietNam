@@ -16,9 +16,13 @@ mô hình/dữ liệu Gold).
 """
 
 import os
+# QUAN TRỌNG: phải đặt TRƯỚC khi import numpy/torch/sklearn - sửa lỗi
+# xung đột thư viện OpenMP/MKL giữa torch và scikit-learn trên Windows.
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
+from gru_quantile_model import GRUQuantileRegressor
 
 GOLD_DIR = os.path.join("data_lake", "gold")
 RESULTS_DIR = os.path.join("results", "tables")
@@ -152,10 +156,8 @@ def run_ablations_for(name: str, df: pd.DataFrame, feature_cols: list, target_co
     X_test = test_df[feature_cols].astype("float64").to_numpy()
     y_test = test_df[target_col].astype("float64").to_numpy()
 
-    model_lower = GradientBoostingRegressor(loss="quantile", alpha=0.05, n_estimators=300,
-                                             max_depth=4, random_state=42)
-    model_upper = GradientBoostingRegressor(loss="quantile", alpha=0.95, n_estimators=300,
-                                             max_depth=4, random_state=42)
+    model_lower = GRUQuantileRegressor(alpha=0.05, n_lag_features=3, epochs=200, lr=3e-3, verbose=True)
+    model_upper = GRUQuantileRegressor(alpha=0.95, n_lag_features=3, epochs=200, lr=3e-3, verbose=True)
     model_lower.fit(X_train, y_train)
     model_upper.fit(X_train, y_train)
 

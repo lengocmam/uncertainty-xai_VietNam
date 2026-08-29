@@ -1,5 +1,5 @@
 method,detail,value
-grouped (SHAP-style),"load_history (khối gộp, không tách lag)",74.81570970568615
-temporal (proposed),load_lag_1,232.46635943707733
-temporal (proposed),load_lag_24,80.02398362487745
-temporal (proposed),load_lag_168,148.83834806958583
+grouped (SHAP-style),"load_history (khối gộp, không tách lag)",49.621452
+temporal (proposed),load_lag_1,5.5615234
+temporal (proposed),load_lag_24,60.01829
+temporal (proposed),load_lag_168,129.0889

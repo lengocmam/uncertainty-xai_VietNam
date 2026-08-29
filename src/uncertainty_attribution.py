@@ -17,9 +17,13 @@ Chạy sau khi đã có train_baseline.py chạy được (dùng lại cùng d�
 """
 
 import os
+# QUAN TRỌNG: phải đặt TRƯỚC khi import numpy/torch/sklearn - sửa lỗi
+# xung đột thư viện OpenMP/MKL giữa torch và scikit-learn trên Windows.
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
+from gru_quantile_model import GRUQuantileRegressor
 from scipy.stats import kendalltau
 
 GOLD_DIR = os.path.join("data_lake", "gold")
@@ -115,12 +119,9 @@ def epistemic_aleatoric_decomposition(X_train, y_train, X_test, feature_cols, n_
         idx = rng.choice(n, size=n, replace=True)
         Xb, yb = X_train[idx], y_train[idx]
 
-        m_low = GradientBoostingRegressor(loss="quantile", alpha=0.05, n_estimators=150,
-                                           max_depth=4, random_state=b)
-        m_med = GradientBoostingRegressor(loss="quantile", alpha=0.5, n_estimators=150,
-                                           max_depth=4, random_state=b)
-        m_up = GradientBoostingRegressor(loss="quantile", alpha=0.95, n_estimators=150,
-                                          max_depth=4, random_state=b)
+        m_low = GRUQuantileRegressor(alpha=0.05, n_lag_features=3, epochs=100, lr=3e-3, random_state=b)
+        m_med = GRUQuantileRegressor(alpha=0.5, n_lag_features=3, epochs=100, lr=3e-3, random_state=b)
+        m_up = GRUQuantileRegressor(alpha=0.95, n_lag_features=3, epochs=100, lr=3e-3, random_state=b)
         m_low.fit(Xb, yb); m_med.fit(Xb, yb); m_up.fit(Xb, yb)
 
         median_preds.append(m_med.predict(X_test))
@@ -182,18 +183,15 @@ def run_full_pipeline(name: str, df: pd.DataFrame, feature_cols: list, target_co
     y_calib = calib_df[target_col].astype("float64").to_numpy()
     X_test = test_df[feature_cols].astype("float64").to_numpy()
 
-    print("  Huấn luyện mô hình quantile chính (lower/upper)...")
-    model_lower = GradientBoostingRegressor(loss="quantile", alpha=0.05, n_estimators=300,
-                                             max_depth=4, random_state=42)
-    model_upper = GradientBoostingRegressor(loss="quantile", alpha=0.95, n_estimators=300,
-                                             max_depth=4, random_state=42)
+    print("  Huấn luyện mô hình quantile chính (lower/upper) — GRU...")
+    model_lower = GRUQuantileRegressor(alpha=0.05, n_lag_features=3, epochs=200, lr=3e-3, verbose=True)
+    model_upper = GRUQuantileRegressor(alpha=0.95, n_lag_features=3, epochs=200, lr=3e-3, verbose=True)
     model_lower.fit(X_train, y_train)
     model_upper.fit(X_train, y_train)
 
-    print("\n  Feature importances (model_upper, alpha=0.95) — kiểm tra xem mô hình"
-          " có thực sự dùng đặc trưng nào không, đặc biệt các biến rời rạc như dayofweek:")
-    for f, imp in sorted(zip(feature_cols, model_upper.feature_importances_), key=lambda x: -x[1]):
-        print(f"    {f:20s}: {imp:.4f}")
+    print("  (Bỏ qua in feature_importances_ - thuộc tính này chỉ có ở mô hình dạng cây,"
+          " không áp dụng cho GRU. Độ quan trọng đặc trưng của GRU được đo qua SHAP"
+          " ở bước Temporal Uncertainty Attribution bên dưới.)")
 
     # Bước 1: Conformal calibration
     lower_calib = model_lower.predict(X_calib)
