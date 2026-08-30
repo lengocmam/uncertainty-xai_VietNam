@@ -1,0 +1,3 @@
+dataset,comparison,pinball_ttest_p,pinball_wilcoxon_p,coverage_dev_ttest_p,coverage_dev_wilcoxon_p
+opsd,main_vs_mcdropout,0.0008493199123199694,0.03125,0.04693923415200792,1.0
+opsd,main_vs_deepensemble,0.270334778841519,0.90625,0.0038303800501066753,1.0

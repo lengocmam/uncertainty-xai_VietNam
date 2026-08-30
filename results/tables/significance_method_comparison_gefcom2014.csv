@@ -1,0 +1,3 @@
+dataset,comparison,pinball_ttest_p,pinball_wilcoxon_p,coverage_dev_ttest_p,coverage_dev_wilcoxon_p
+gefcom2014,main_vs_mcdropout,6.436988903764795e-05,0.03125,2.24691001739228e-05,0.03125
+gefcom2014,main_vs_deepensemble,0.19262194537329663,0.9375,8.457096795056062e-05,0.03125
