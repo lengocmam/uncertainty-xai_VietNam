@@ -78,8 +78,10 @@ def run_one_seed(df, feature_cols, seed, target_col="LOAD"):
     row["mcdropout_pinball_0.5"] = pinball_loss(y_test, med_mc, 0.5)
     row["mcdropout_width"] = np.mean(hi_mc - lo_mc)
 
-    de_lo = DeepEnsembleQuantileRegressor(alpha=0.05, n_members=N_ENSEMBLE_MEMBERS, epochs=EPOCHS_ROBUST)
-    de_hi = DeepEnsembleQuantileRegressor(alpha=0.95, n_members=N_ENSEMBLE_MEMBERS, epochs=EPOCHS_ROBUST)
+    de_lo = DeepEnsembleQuantileRegressor(alpha=0.05, n_members=N_ENSEMBLE_MEMBERS,
+                                           epochs=EPOCHS_ROBUST, random_state=seed)
+    de_hi = DeepEnsembleQuantileRegressor(alpha=0.95, n_members=N_ENSEMBLE_MEMBERS,
+                                           epochs=EPOCHS_ROBUST, random_state=seed)
     de_lo.fit(X_train, y_train); de_hi.fit(X_train, y_train)
     lo_de, hi_de = de_lo.predict(X_test), de_hi.predict(X_test)
     row["deepensemble_coverage"] = coverage(y_test, lo_de, hi_de)

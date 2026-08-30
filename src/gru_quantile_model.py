@@ -255,26 +255,33 @@ class DeepEnsembleQuantileRegressor:
     """
 
     def __init__(self, alpha, n_members=5, n_lag_features=3, epochs=150,
-                 lr=3e-3, verbose=False):
+                 lr=3e-3, random_state=0, verbose=False):
         self.alpha = alpha
         self.n_members = n_members
         self.n_lag_features = n_lag_features
         self.epochs = epochs
         self.lr = lr
+        self.random_state = random_state  # SỬA LỖI: giờ có thể truyền seed từ ngoài vào
         self.verbose = verbose
         self.members = []
 
     def fit(self, X, y):
         self.members = []
         for m in range(self.n_members):
+            # SỬA LỖI: kết hợp seed ngoài (self.random_state) với chỉ số
+            # thành viên (m) - trước đây luôn cố định 1000+m bất kể seed
+            # ngoài là gì, khiến toàn bộ ensemble giống hệt nhau qua mọi
+            # lần gọi khác seed, làm sai lệch kiểm định đa-seed.
+            member_seed = self.random_state * 1000 + m
             model = GRUQuantileRegressor(
                 alpha=self.alpha, n_lag_features=self.n_lag_features,
-                epochs=self.epochs, lr=self.lr, random_state=1000 + m,  # seed khác nhau, KHÔNG bootstrap
+                epochs=self.epochs, lr=self.lr, random_state=member_seed,
                 verbose=False)
             model.fit(X, y)  # dùng NGUYÊN tập train, không resample
             self.members.append(model)
             if self.verbose:
-                print(f"      [DeepEnsemble alpha={self.alpha}] thành viên {m+1}/{self.n_members} xong")
+                print(f"      [DeepEnsemble alpha={self.alpha}] thành viên {m+1}/{self.n_members} "
+                      f"(seed={member_seed}) xong")
         return self
 
     def predict(self, X):
