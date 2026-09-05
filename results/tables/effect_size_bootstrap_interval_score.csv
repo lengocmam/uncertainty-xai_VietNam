@@ -1,5 +1,5 @@
-dataset,comparison,seed_used,n_test_points,mean_interval_score_diff,bootstrap_ci95_lower,bootstrap_ci95_upper,significant
-gefcom2014,main_vs_mcdropout,1,11525,-24.950358147354297,-25.97223649074731,-23.924581328332074,True
-gefcom2014,main_vs_deepensemble,1,11525,0.693588796621799,0.3811724367967432,1.0056494661771687,True
-opsd,main_vs_mcdropout,1,10045,-298.3735047518792,-316.78356261582275,-280.23910110349937,True
-opsd,main_vs_deepensemble,1,10045,46.80852574467539,38.928862319668355,55.36731359436827,True
+dataset,comparison,seed_used,n_test_points,block_size,bootstrap_method,mean_interval_score_diff,bootstrap_ci95_lower,bootstrap_ci95_upper,significant
+gefcom2014,main_vs_mcdropout,1,11525,24,moving_block,-24.950358147354297,-26.482910246458154,-23.453435430887385,True
+gefcom2014,main_vs_deepensemble,1,11525,24,moving_block,0.693588796621799,0.13802445177926914,1.172354446906247,True
+opsd,main_vs_mcdropout,1,10045,24,moving_block,-298.3735047518792,-324.1853257938652,-273.9725937251836,True
+opsd,main_vs_deepensemble,1,10045,24,moving_block,46.80852574467539,36.21709028714553,57.84505661113995,True

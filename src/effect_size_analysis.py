@@ -47,10 +47,29 @@ def seed_level_effect_size(name: str):
     return pd.DataFrame(rows)
 
 
-def bootstrap_interval_score_ci(name: str, n_bootstrap=N_BOOTSTRAP):
-    """Bootstrap CI cho chenh lech Interval Score giua main va tung baseline,
-    O MUC PREDICTION-LEVEL (khong phai chi 5 seed) - dung seed trung vi de
-    dai dien 1 lan chay thuc te, resample theo TIMESTAMP (co thay the)."""
+def moving_block_bootstrap_indices(n: int, block_size: int, rng: np.random.RandomState) -> np.ndarray:
+    """
+    Tra ve 1 bo chi so length n, ghep tu cac KHOI LIEN TIEP (moving block
+    bootstrap, Kunsch 1989) thay vi lay tung diem doc lap (i.i.d. bootstrap).
+
+    LY DO CAN THIET (diem 2 - gop y quan trong): du lieu phu tai theo GIO
+    co tu tuong quan manh (gio ke nhau giong nhau) - i.i.d. bootstrap gia
+    dinh sai cac diem doc lap, lam KHOANG TIN CAY BI HEP GIA TAO (qua tu
+    tin). Block bootstrap giu nguyen cau truc phu thuoc trong tung khoi,
+    cho uoc luong do bat dinh dung dan hon.
+    """
+    n_blocks_needed = int(np.ceil(n / block_size))
+    max_start = n - block_size
+    starts = rng.randint(0, max_start + 1, size=n_blocks_needed)
+    idx = np.concatenate([np.arange(s, s + block_size) for s in starts])
+    return idx[:n]
+
+
+def bootstrap_interval_score_ci(name: str, n_bootstrap=N_BOOTSTRAP, block_size: int = 24):
+    """Block bootstrap CI (khong phai i.i.d.) cho chenh lech Interval Score
+    giua main va tung baseline, o MUC PREDICTION-LEVEL. block_size=24 (1 ngay)
+    mac dinh de bao toan chu ky ngay-dem trong du lieu phu tai theo gio -
+    dieu chinh neu do phan giai du lieu khac (vi du 48 cho du lieu 30 phut)."""
     pred = pd.read_csv(os.path.join(RESULTS_DIR, f"predictions_{name}.csv"))
     ms = pd.read_csv(os.path.join(RESULTS_DIR, f"multiseed_method_comparison_{name}.csv"))
     median_cov = ms["main_coverage"].median()
@@ -78,13 +97,14 @@ def bootstrap_interval_score_ci(name: str, n_bootstrap=N_BOOTSTRAP):
 
         boot_means = np.empty(n_bootstrap)
         for b in range(n_bootstrap):
-            idx = RNG.choice(n, size=n, replace=True)
+            idx = moving_block_bootstrap_indices(n, block_size, RNG)
             boot_means[b] = diffs[idx].mean()
         ci_lo, ci_hi = np.percentile(boot_means, [2.5, 97.5])
 
         rows.append({
             "dataset": name, "comparison": f"main_vs_{baseline_label}",
-            "seed_used": seed, "n_test_points": n,
+            "seed_used": seed, "n_test_points": n, "block_size": block_size,
+            "bootstrap_method": "moving_block",
             "mean_interval_score_diff": diffs.mean(),
             "bootstrap_ci95_lower": ci_lo, "bootstrap_ci95_upper": ci_hi,
             "significant": not (ci_lo <= 0 <= ci_hi),
@@ -116,8 +136,10 @@ if __name__ == "__main__":
         pd.concat(all_bootstrap, ignore_index=True).to_csv(
             os.path.join(RESULTS_DIR, "effect_size_bootstrap_interval_score.csv"), index=False)
         print("\nHoan tat - luu trong results/tables/effect_size_seedlevel.csv va "
-              "effect_size_bootstrap_interval_score.csv. Dung ca 2 khi viet Section 5.1: "
-              "seed-level (n=5, yeu ve power) DE BO SUNG cho bootstrap prediction-level "
-              "(n lon, manh hon nhung gia dinh doc lap giua cac timestamp co the bi vi pham "
-              "do tu tuong quan - can neu ro trong Limitations).")
-        
+              "effect_size_bootstrap_interval_score.csv. CI prediction-level dung MOVING "
+              "BLOCK BOOTSTRAP (block_size=24 gio, khong phai i.i.d.) de ton trong tu tuong "
+              "quan chuoi thoi gian - ghi ro dieu nay trong Methodology/Section 5.1, khong "
+              "goi la 'bootstrap' chung chung. Dung ca 2 bang khi viet: seed-level (n=5, "
+              "yeu ve power) DE BO SUNG cho block-bootstrap prediction-level (n lon hon "
+              "nhieu, nhung van co the con mot phan tu tuong quan chua duoc loai bo hoan "
+              "toan tuy block_size - neu trong Limitations).")

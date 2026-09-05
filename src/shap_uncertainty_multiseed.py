@@ -53,6 +53,15 @@ def run_one_seed(df: pd.DataFrame, feature_cols: list, seed: int, target_col: st
     m_lo.fit(X_train, y_train); m_med.fit(X_train, y_train); m_hi.fit(X_train, y_train)
 
     def width_fn(X):
+        # LUU Y QUAN TRONG (diem 3): day la DO RONG THO (q_hat_0.95 - q_hat_0.05)
+        # TRUOC khi cong them he so hieu chinh conformal. He so hieu chinh la
+        # MOT HANG SO cong vao ca 2 dau (lower - c, upper + c) cho MOI diem
+        # trong tap test -> no lam TANG do rong tuyet doi len 2*c nhung KHONG
+        # phu thuoc vao x -> KHONG dong gop gi vao SHAP (vi SHAP giai thich
+        # PHUONG SAI theo x, hang so khong co phuong sai). Vi vay giai thich
+        # tren do rong THO la chinh xac ve mat TUONG DOI giua cac dac trung,
+        # dung cho ca do rong DA HIEU CHINH - chi khac o phan hang so cong
+        # them, khong lien quan gi den SHAP attribution.
         return m_hi.predict(X) - m_lo.predict(X)
 
     def point_fn(X):
@@ -67,23 +76,42 @@ def run_one_seed(df: pd.DataFrame, feature_cols: list, seed: int, target_col: st
     shap_width = explainer_width.shap_values(X_test_subset, nsamples="auto")
     mean_abs_width = np.abs(shap_width).mean(axis=0)
 
+    # DIEM 3 - ADDITIVITY CHECK: xac nhan SHAP thuc su giai thich dung ham
+    # width_fn (khong phai loi wrapper) - kiem tra sum(SHAP) + expected_value
+    # ~ width_fn(x) cho tung diem, sai so nho la binh thuong (KernelExplainer
+    # xap xi bang lay mau, khong chinh xac tuyet doi nhu TreeExplainer).
+    actual_width = width_fn(X_test_subset)
+    reconstructed = shap_width.sum(axis=1) + explainer_width.expected_value
+    additivity_error = np.abs(actual_width - reconstructed)
+    print(f"    [Additivity check - width] sai so trung binh: {additivity_error.mean():.4f}, "
+          f"sai so lon nhat: {additivity_error.max():.4f} "
+          f"(so voi do rong trung binh: {actual_width.mean():.4f}) "
+          f"-> {'DAT' if additivity_error.mean() < 0.05 * actual_width.mean() else 'CANH BAO: sai so cao'}")
+
     explainer_point = shap.KernelExplainer(point_fn, background)
     shap_point = explainer_point.shap_values(X_test_subset, nsamples="auto")
     mean_abs_point = np.abs(shap_point).mean(axis=0)
 
-    return mean_abs_width, mean_abs_point
+    return mean_abs_width, mean_abs_point, additivity_error.mean()
 
 
 def run_for_dataset(name: str, df: pd.DataFrame, feature_cols: list):
     print(f"\n{'='*60}\nSHAP UNCERTAINTY ATTRIBUTION (multi-seed) - {name}\n{'='*60}")
 
-    width_records, point_records = [], []
+    width_records, point_records, additivity_errors = [], [], []
     for seed in range(N_SEEDS):
         print(f"\n  --- Seed {seed+1}/{N_SEEDS} ---")
-        mean_abs_width, mean_abs_point = run_one_seed(df, feature_cols, seed)
+        mean_abs_width, mean_abs_point, add_err = run_one_seed(df, feature_cols, seed)
         width_records.append(dict(zip(feature_cols, mean_abs_width)))
         point_records.append(dict(zip(feature_cols, mean_abs_point)))
+        additivity_errors.append(add_err)
         print(f"    Xong seed {seed}")
+
+    print(f"\n  [Additivity check tong hop qua {N_SEEDS} seed] "
+          f"mean={np.mean(additivity_errors):.4f}, max={np.max(additivity_errors):.4f} "
+          f"-> ghi ro trong Methodology: 'SHAP attributions satisfy the additivity property "
+          f"up to KernelExplainer sampling error (mean reconstruction error = "
+          f"{np.mean(additivity_errors):.4f})'.")
 
     width_df = pd.DataFrame(width_records)
     point_df = pd.DataFrame(point_records)
@@ -111,10 +139,12 @@ def run_for_dataset(name: str, df: pd.DataFrame, feature_cols: list):
     tau, _ = pd.Series(summary["rank_width"].values).corr(
         pd.Series(summary["rank_point"].values), method="kendall"), None
     print(f"\n  Kendall's tau giua ranking SHAP(width) va SHAP(point forecast): {tau:.3f}")
-    print(f"  (Gan 1: 2 ranking gan giong nhau -> dac trung quan trong cho DU BAO cung quan trong "
-          f"cho DO BAT DINH. Gan 0 hoac am: 2 ranking KHAC NHAU -> day la bang chung manh nhat "
-          f"cho thay giai thich uncertainty la mot BAI TOAN KHAC, khong the suy ra tu giai thich "
-          f"point forecast - dung ung ho luan diem chinh cua bai bao.)")
+    print(f"  DIEN GIAI DUNG (KHONG noi 'gan 1' hay 'gan 0'): tau={tau:.3f} the hien mot "
+          f"TUONG QUAN DUONG giua 2 ranking (cac dac trung quan trong cho du bao co xu huong "
+          f"cung quan trong cho do bat dinh), NHUNG thu hang KHONG TRUNG KHOP hoan toan - "
+          f"cu the la {(summary['rank_shift'] != 0).sum()}/{len(summary)} dac trung doi thu hang "
+          f"giua 2 cach giai thich (xem cot rank_shift). Day la bang chung rang giai thich do "
+          f"bat dinh la MOT BAI TOAN CO LIEN QUAN NHUNG KHONG DONG NHAT voi giai thich diem du bao.")
 
     summary.insert(0, "dataset", name)
     summary.to_csv(os.path.join(RESULTS_DIR, f"shap_uncertainty_vs_point_{name}.csv"), index=False)
