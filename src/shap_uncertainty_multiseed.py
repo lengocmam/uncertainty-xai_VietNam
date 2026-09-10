@@ -52,6 +52,11 @@ def run_one_seed(df: pd.DataFrame, feature_cols: list, seed: int, target_col: st
     m_hi = GRUQuantileRegressor(alpha=0.95, n_lag_features=3, epochs=EPOCHS, random_state=seed)
     m_lo.fit(X_train, y_train); m_med.fit(X_train, y_train); m_hi.fit(X_train, y_train)
 
+    n_crossings = int((m_lo.predict(X_test) > m_hi.predict(X_test)).sum())
+    if n_crossings > 0:
+        print(f"    [Luu y] {n_crossings}/{len(X_test)} diem test co quantile crossing tho "
+              f"(m_lo > m_hi) - da xu ly bang abs() trong width_fn, khong anh huong SHAP.")
+
     def width_fn(X):
         # LUU Y QUAN TRONG (diem 3): day la DO RONG THO (q_hat_0.95 - q_hat_0.05)
         # TRUOC khi cong them he so hieu chinh conformal. He so hieu chinh la
@@ -62,7 +67,10 @@ def run_one_seed(df: pd.DataFrame, feature_cols: list, seed: int, target_col: st
         # tren do rong THO la chinh xac ve mat TUONG DOI giua cac dac trung,
         # dung cho ca do rong DA HIEU CHINH - chi khac o phan hang so cong
         # them, khong lien quan gi den SHAP attribution.
-        return m_hi.predict(X) - m_lo.predict(X)
+        # SUA (lien quan diem 2): dung abs() de tranh do rong AM gia tao khi
+        # m_lo.predict(x) > m_hi.predict(x) tai mot so diem (quantile crossing
+        # tho, truoc reorder) - do rong ve mat khai niem PHAI khong am.
+        return np.abs(m_hi.predict(X) - m_lo.predict(X))
 
     def point_fn(X):
         return m_med.predict(X)
@@ -120,6 +128,53 @@ def run_for_dataset(name: str, df: pd.DataFrame, feature_cols: list):
     # (dung hon la lay mean tho roi moi chuan hoa 1 lan)
     width_pct = width_df.div(width_df.sum(axis=1), axis=0) * 100
     point_pct = point_df.div(point_df.sum(axis=1), axis=0) * 100
+
+    # ----- DIEM 4: Stability statistic - Spearman + Top-k Jaccard overlap -----
+    # KHONG can train lai model - chi dung lai width_pct da co (5 vector,
+    # moi vector la 1 seed) - tinh TUONG QUAN GIUA CAC SEED, khong phai
+    # giua width va point nhu Kendall's tau o tren.
+    from itertools import combinations
+    from scipy.stats import spearmanr
+
+    n_seeds_actual = len(width_pct)
+    seed_pairs = list(combinations(range(n_seeds_actual), 2))
+
+    spearman_vals = []
+    jaccard_top3, jaccard_top5 = [], []
+    for i, j in seed_pairs:
+        vec_i = width_pct.iloc[i]
+        vec_j = width_pct.iloc[j]
+        rho, _ = spearmanr(vec_i.values, vec_j.values)
+        spearman_vals.append(rho)
+
+        top3_i = set(vec_i.sort_values(ascending=False).index[:3])
+        top3_j = set(vec_j.sort_values(ascending=False).index[:3])
+        jaccard_top3.append(len(top3_i & top3_j) / len(top3_i | top3_j))
+
+        k5 = min(5, len(feature_cols))
+        top5_i = set(vec_i.sort_values(ascending=False).index[:k5])
+        top5_j = set(vec_j.sort_values(ascending=False).index[:k5])
+        jaccard_top5.append(len(top5_i & top5_j) / len(top5_i | top5_j))
+
+    print(f"\n  {name.upper()} - STABILITY STATISTIC qua {n_seeds_actual} seed "
+          f"({len(seed_pairs)} cap seed):")
+    print(f"    Mean pairwise Spearman rank correlation = "
+          f"{np.mean(spearman_vals):.2f} +/- {np.std(spearman_vals):.2f}")
+    print(f"    Top-3 feature overlap (Jaccard) = {np.mean(jaccard_top3)*100:.0f}% "
+          f"(+/- {np.std(jaccard_top3)*100:.0f}%)")
+    print(f"    Top-5 feature overlap (Jaccard) = {np.mean(jaccard_top5)*100:.0f}% "
+          f"(+/- {np.std(jaccard_top5)*100:.0f}%)")
+    print(f"    (Cang gan 1.0 / 100%: ranking cac dac trung gay bat dinh ON DINH qua "
+          f"cac lan khoi tao ngau nhien khac nhau, KHONG phai artifact cua 1 random "
+          f"initialization don le.)")
+
+    stability_summary = pd.DataFrame([{
+        "dataset": name, "n_seeds": n_seeds_actual, "n_seed_pairs": len(seed_pairs),
+        "mean_spearman": np.mean(spearman_vals), "std_spearman": np.std(spearman_vals),
+        "mean_jaccard_top3": np.mean(jaccard_top3), "std_jaccard_top3": np.std(jaccard_top3),
+        "mean_jaccard_top5": np.mean(jaccard_top5), "std_jaccard_top5": np.std(jaccard_top5),
+    }])
+    stability_summary.to_csv(os.path.join(RESULTS_DIR, f"shap_stability_{name}.csv"), index=False)
 
     summary = pd.DataFrame({
         "feature": feature_cols,

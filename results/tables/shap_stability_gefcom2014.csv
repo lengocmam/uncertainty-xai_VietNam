@@ -1,0 +1,2 @@
+dataset,n_seeds,n_seed_pairs,mean_spearman,std_spearman,mean_jaccard_top3,std_jaccard_top3,mean_jaccard_top5,std_jaccard_top5
+gefcom2014,5,10,0.9771428571428572,0.027994168488950564,1.0,0.0,1.0,0.0

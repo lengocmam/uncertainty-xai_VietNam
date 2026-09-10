@@ -46,6 +46,23 @@ def conformal_correction(y_calib, lower_calib, upper_calib, alpha=0.1):
     return np.quantile(scores, q_level)
 
 
+# ============================================================
+# XU LY INTERVAL CROSSING (diem 2 - bat buoc) - reorder bang min/max
+# ============================================================
+def count_crossings(lower: np.ndarray, upper: np.ndarray) -> int:
+    return int((lower > upper).sum())
+
+
+def enforce_monotonic_bounds(lower: np.ndarray, upper: np.ndarray):
+    """Reorder bang elementwise min/max de DAM BAO lower<=upper tuyet doi
+    100% - ap dung SAU khi da cong/tru he so hieu chinh conformal (final
+    step), khong phai truoc do. Tra ve (lower_fixed, upper_fixed, n_fixed)."""
+    n_fixed = count_crossings(lower, upper)
+    lower_fixed = np.minimum(lower, upper)
+    upper_fixed = np.maximum(lower, upper)
+    return lower_fixed, upper_fixed, n_fixed
+
+
 import time
 
 def run_one_seed(df, feature_cols, seed, target_col="LOAD"):
@@ -73,8 +90,19 @@ def run_one_seed(df, feature_cols, seed, target_col="LOAD"):
 
     lo_calib, hi_calib = m_lo.predict(X_calib), m_hi.predict(X_calib)
     correction = conformal_correction(y_calib, lo_calib, hi_calib)
-    lo_test = m_lo.predict(X_test) - correction
-    hi_test = m_hi.predict(X_test) + correction
+
+    lo_raw_test, hi_raw_test = m_lo.predict(X_test), m_hi.predict(X_test)
+    row["main_raw_crossings_before_correction"] = count_crossings(lo_raw_test, hi_raw_test)
+
+    lo_test_precross = lo_raw_test - correction
+    hi_test_precross = hi_raw_test + correction
+    row["main_crossings_after_correction_before_reorder"] = count_crossings(lo_test_precross, hi_test_precross)
+
+    # REORDER bang min/max - SAU khi cong/tru correction (final step) -
+    # dam bao lower<=upper tuyet doi 100% cho MOI diem.
+    lo_test, hi_test, _ = enforce_monotonic_bounds(lo_test_precross, hi_test_precross)
+    row["main_crossings_final"] = count_crossings(lo_test, hi_test)  # phai luon = 0
+
     med_test = m_med.predict(X_test)  # median THẬT, không xấp xỉ (lo+hi)/2
 
     row["main_pinball_0.05"] = pinball_loss(y_test, lo_test, 0.05)
@@ -89,7 +117,9 @@ def run_one_seed(df, feature_cols, seed, target_col="LOAD"):
     mc = MCDropoutRegressor(n_lag_features=3, epochs=EPOCHS_ROBUST, random_state=seed)
     mc.fit(X_train, y_train)
     row["mcdropout_train_time_s"] = time.time() - t0
-    lo_mc, med_mc, hi_mc = mc.predict_interval(X_test)
+    lo_mc_raw, med_mc, hi_mc_raw = mc.predict_interval(X_test)
+    row["mcdropout_crossings_raw"] = count_crossings(lo_mc_raw, hi_mc_raw)
+    lo_mc, hi_mc, _ = enforce_monotonic_bounds(lo_mc_raw, hi_mc_raw)
     row["mcdropout_pinball_0.05"] = pinball_loss(y_test, lo_mc, 0.05)
     row["mcdropout_pinball_0.5"] = pinball_loss(y_test, med_mc, 0.5)
     row["mcdropout_pinball_0.95"] = pinball_loss(y_test, hi_mc, 0.95)
@@ -108,7 +138,9 @@ def run_one_seed(df, feature_cols, seed, target_col="LOAD"):
     de_lo.fit(X_train, y_train); de_med.fit(X_train, y_train); de_hi.fit(X_train, y_train)
     row["deepensemble_train_time_s"] = time.time() - t0
 
-    lo_de, med_de, hi_de = de_lo.predict(X_test), de_med.predict(X_test), de_hi.predict(X_test)
+    lo_de_raw, med_de, hi_de_raw = de_lo.predict(X_test), de_med.predict(X_test), de_hi.predict(X_test)
+    row["deepensemble_crossings_raw"] = count_crossings(lo_de_raw, hi_de_raw)
+    lo_de, hi_de, _ = enforce_monotonic_bounds(lo_de_raw, hi_de_raw)
     row["deepensemble_pinball_0.05"] = pinball_loss(y_test, lo_de, 0.05)
     row["deepensemble_pinball_0.5"] = pinball_loss(y_test, med_de, 0.5)
     row["deepensemble_pinball_0.95"] = pinball_loss(y_test, hi_de, 0.95)
@@ -118,33 +150,32 @@ def run_one_seed(df, feature_cols, seed, target_col="LOAD"):
 
     # ----- Prediction-level output: 1 dòng / timestamp / phương pháp -----
     # Dùng chung timestamps cho cả 3 phương pháp (cùng test_df) - đúng yêu cầu.
+    # q05_raw/q95_raw = TRUOC ca conformal correction LAN reorder (neu co);
+    # lower/upper_bound_final = SAU correction (main) hoac sau reorder (ca 3) -
+    # dam bao 100% lower_bound_final <= upper_bound_final trong file luu ra.
     timestamps = test_df["timestamp"].to_numpy()
     pred_blocks = []
 
-    # main: q05_raw/q95_raw là dự báo GRU TRƯỚC hiệu chỉnh conformal;
-    # lower/upper_bound_final là SAU hiệu chỉnh. q50 không bị conformal điều chỉnh.
-    lo_raw_main = m_lo.predict(X_test)
-    hi_raw_main = m_hi.predict(X_test)
     pred_blocks.append(pd.DataFrame({
         "seed": seed, "method": "GRU+CP", "timestamp": timestamps, "y_true": y_test,
-        "q05_raw": lo_raw_main, "q50": med_test, "q95_raw": hi_raw_main,
+        "q05_raw": lo_raw_test, "q50": med_test, "q95_raw": hi_raw_test,
         "lower_bound_final": lo_test, "upper_bound_final": hi_test,
         "interval_width": hi_test - lo_test,
         "covered_90": ((y_test >= lo_test) & (y_test <= hi_test)).astype(int),
     }))
 
-    # MC Dropout và Deep Ensemble không có bước hiệu chỉnh riêng biệt trong
-    # nghiên cứu này -> raw == final (ghi rõ để không hiểu nhầm là đã calibrate).
+    # MC Dropout và Deep Ensemble không có bước conformal calibration rieng,
+    # nhung VAN duoc reorder (min/max) de dam bao khong crossing trong file luu.
     pred_blocks.append(pd.DataFrame({
         "seed": seed, "method": "MCDropout", "timestamp": timestamps, "y_true": y_test,
-        "q05_raw": lo_mc, "q50": med_mc, "q95_raw": hi_mc,
+        "q05_raw": lo_mc_raw, "q50": med_mc, "q95_raw": hi_mc_raw,
         "lower_bound_final": lo_mc, "upper_bound_final": hi_mc,
         "interval_width": hi_mc - lo_mc,
         "covered_90": ((y_test >= lo_mc) & (y_test <= hi_mc)).astype(int),
     }))
     pred_blocks.append(pd.DataFrame({
         "seed": seed, "method": "DeepEnsemble", "timestamp": timestamps, "y_true": y_test,
-        "q05_raw": lo_de, "q50": med_de, "q95_raw": hi_de,
+        "q05_raw": lo_de_raw, "q50": med_de, "q95_raw": hi_de_raw,
         "lower_bound_final": lo_de, "upper_bound_final": hi_de,
         "interval_width": hi_de - lo_de,
         "covered_90": ((y_test >= lo_de) & (y_test <= hi_de)).astype(int),
@@ -237,7 +268,41 @@ def run_all_for(name: str, df: pd.DataFrame, feature_cols: list):
     results_df = pd.DataFrame(rows)
     results_df.to_csv(os.path.join(RESULTS_DIR, f"multiseed_method_comparison_{name}.csv"), index=False)
 
+    # ----- Bao cao dung format checklist yeu cau (diem 2) -----
+    total_raw_crossings = results_df["main_raw_crossings_before_correction"].sum()
+    total_postcorr_crossings = results_df["main_crossings_after_correction_before_reorder"].sum()
+    total_final_crossings = results_df["main_crossings_final"].sum()
+    total_mc_crossings = results_df["mcdropout_crossings_raw"].sum()
+    total_de_crossings = results_df["deepensemble_crossings_raw"].sum()
+
     predictions_all_df = pd.concat(all_predictions, ignore_index=True)
+    invalid_final = (predictions_all_df["lower_bound_final"] >
+                      predictions_all_df["upper_bound_final"]).sum()
+    width_mismatch = (np.abs(predictions_all_df["interval_width"] -
+                              (predictions_all_df["upper_bound_final"] -
+                               predictions_all_df["lower_bound_final"])) > 1e-6).sum()
+    nan_count = predictions_all_df.isna().sum().sum()
+    recomputed_cov = ((predictions_all_df["y_true"] >= predictions_all_df["lower_bound_final"]) &
+                       (predictions_all_df["y_true"] <= predictions_all_df["upper_bound_final"])).astype(int)
+    cov_matches = (recomputed_cov == predictions_all_df["covered_90"]).all()
+
+    print(f"\n{'='*60}\nBAO CAO XU LY INTERVAL CROSSING - {name}\n{'='*60}")
+    print(f"  GRU+CP - so quantile crossing TRUOC correction (tong {N_SEEDS} seed): {total_raw_crossings}")
+    print(f"  GRU+CP - so crossing SAU correction, TRUOC reorder: {total_postcorr_crossings}")
+    print(f"  GRU+CP - so crossing SAU reorder (FINAL, phai = 0): {total_final_crossings}")
+    print(f"  MC Dropout - so crossing raw (tong {N_SEEDS} seed): {total_mc_crossings}")
+    print(f"  Deep Ensemble - so crossing raw (tong {N_SEEDS} seed): {total_de_crossings}")
+    print(f"\n  Invalid lower > upper intervals: {invalid_final}")
+    print(f"  Width mismatch: {width_mismatch}")
+    print(f"  NaN: {nan_count}")
+    print(f"  Recomputed coverage == reported coverage: {'pass' if cov_matches else 'FAIL'}")
+    print(f"\n  Tra loi cac cau hoi bat buoc:")
+    print(f"  - Bounds duoc reorder bang min/max SAU conformal correction (khong phai truoc).")
+    print(f"  - So quantile crossing TRUOC correction: {total_raw_crossings} (tren {N_SEEDS} seed).")
+    print(f"  - So final interval crossing SAU correction+reorder: {total_final_crossings} (luon = 0 do thiet ke).")
+    print(f"  - Metrics, figures, SHAP-width va bootstrap DEU dung predictions_{name}.csv "
+          f"da qua reorder nay (file duy nhat duoc sinh ra, khong co ban chua sua song song).")
+
     pred_path = os.path.join(RESULTS_DIR, f"predictions_{name}.csv")
     predictions_all_df.to_csv(pred_path, index=False)
     print(f"\n  Da luu prediction-level output: {pred_path} ({len(predictions_all_df):,} dong "

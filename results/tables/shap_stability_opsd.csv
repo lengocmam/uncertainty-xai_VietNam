@@ -1,0 +1,2 @@
+dataset,n_seeds,n_seed_pairs,mean_spearman,std_spearman,mean_jaccard_top3,std_jaccard_top3,mean_jaccard_top5,std_jaccard_top5
+opsd,5,10,0.825,0.09237512254555398,0.65,0.22912878474779197,0.8666666666666666,0.16329931618554522
